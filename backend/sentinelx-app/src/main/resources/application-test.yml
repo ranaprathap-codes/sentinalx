@@ -1,0 +1,38 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  datasource:
+    url: jdbc:tc:postgresql:16-alpine:///sentinelx
+    username: sentinelx
+    password: sentinelx_dev
+
+  redis:
+    host: localhost
+    port: 6379
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  flyway:
+    enabled: false
+
+sentinelx:
+  jwt:
+    secret: test-secret-key-min-32-chars-long-for-hmac-sha256-testing
+  ai:
+    enabled: false
+
+logging:
+  level:
+    com.sentinelx: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: OFF

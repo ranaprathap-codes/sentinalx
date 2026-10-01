@@ -1,0 +1,69 @@
+package com.sentinelx.shared.util
+
+import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.stereotype.Service
+import java.time.Duration
+
+@Service
+class IdempotencyService(
+    private val redisTemplate: RedisTemplate<String, String>
+) {
+
+    companion object {
+        const val IDEMPOTENCY_PREFIX = "idempotency:"
+        const val DEFAULT_TTL_SECONDS: Long = 86400L
+    }
+
+    fun tryAcquire(
+        idempotencyKey: String,
+        ttlSeconds: Long = DEFAULT_TTL_SECONDS
+    ): Boolean {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+
+        val result = redisTemplate.opsForValue().setIfAbsent(
+            key,
+            "processing",
+            Duration.ofSeconds(ttlSeconds)
+        )
+
+        return result == true
+    }
+
+    fun complete(
+        idempotencyKey: String,
+        result: String,
+        ttlSeconds: Long = DEFAULT_TTL_SECONDS
+    ) {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+
+        redisTemplate.opsForValue().set(
+            key,
+            result,
+            Duration.ofSeconds(ttlSeconds)
+        )
+    }
+
+    fun getResult(
+        idempotencyKey: String
+    ): String? {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+
+        return redisTemplate.opsForValue().get(key)
+    }
+
+    fun isProcessing(
+        idempotencyKey: String
+    ): Boolean {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+
+        return redisTemplate.opsForValue().get(key) == "processing"
+    }
+
+    fun release(
+        idempotencyKey: String
+    ) {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+
+        redisTemplate.delete(key)
+    }
+}

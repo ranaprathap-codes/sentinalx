@@ -1,0 +1,643 @@
+
+===== .\sentinelx-shared\build.gradle.kts =====
+plugins {
+    id("org.springframework.boot")
+    id("io.spring.dependency-management")
+    id("org.flywaydb.flyway")
+}
+
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-cache")
+    implementation("org.springframework.data:spring-data-commons")
+
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
+
+    implementation("org.postgresql:postgresql")
+    implementation("com.github.ben-manes.caffeine:caffeine")
+
+    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
+    implementation("io.jsonwebtoken:jjwt-impl:0.12.6")
+    implementation("io.jsonwebtoken:jjwt-jackson:0.12.6")
+
+    implementation("org.springframework.kafka:spring-kafka")
+
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+
+    implementation("org.modelmapper:modelmapper:3.2.2")
+
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.security:spring-security-test")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:redis")
+    testImplementation("org.testcontainers:kafka")
+}
+
+flyway {
+    url = providers.gradleProperty("flyway.url")
+        .orElse("jdbc:postgresql://localhost:5432/sentinelx")
+        .get()
+
+    user = providers.gradleProperty("flyway.user")
+        .orElse("sentinelx")
+        .get()
+
+    password = providers.gradleProperty("flyway.password")
+        .orElse("sentinelx_dev")
+        .get()
+
+    locations = arrayOf(
+        "filesystem:../../infrastructure/db/init"
+    )
+
+    baselineOnMigrate = true
+}
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\config\RedisConfig.kt =====
+package com.sentinelx.shared.config
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.KotlinModule
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.data.redis.connection.RedisConnectionFactory
+import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer
+import org.springframework.data.redis.serializer.StringRedisSerializer
+
+@Configuration
+class RedisConfig {
+
+    @Bean
+    fun redisTemplate(connectionFactory: RedisConnectionFactory, objectMapper: ObjectMapper): RedisTemplate<String, String> {
+        val template = RedisTemplate<String, String>()
+        template.connectionFactory = connectionFactory
+        template.keySerializer = StringRedisSerializer()
+        template.valueSerializer = GenericJackson2JsonRedisSerializer(objectMapper)
+        template.hashKeySerializer = StringRedisSerializer()
+        template.hashValueSerializer = GenericJackson2JsonRedisSerializer(objectMapper)
+        template.afterPropertiesSet()
+        return template
+    }
+
+    @Bean
+    fun objectMapper(): ObjectMapper {
+        return ObjectMapper().apply {
+            registerModule(KotlinModule())
+            registerModule(JavaTimeModule())
+        }
+    }
+}
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\event\DomainEvent.kt =====
+package com.sentinelx.shared.event
+
+import com.fasterxml.jackson.annotation.JsonSubTypes
+import com.fasterxml.jackson.annotation.JsonTypeInfo
+import java.time.Instant
+import java.util.UUID
+
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "eventType")
+@JsonSubTypes(
+    JsonSubTypes.Type(value = TransactionCreatedEvent::class, name = "TransactionCreated"),
+    JsonSubTypes.Type(value = TransactionStateChangedEvent::class, name = "TransactionStateChanged"),
+    JsonSubTypes.Type(value = RiskEvaluationCompletedEvent::class, name = "RiskEvaluationCompleted"),
+    JsonSubTypes.Type(value = SimulationCompletedEvent::class, name = "SimulationCompleted"),
+    JsonSubTypes.Type(value = ReportCreatedEvent::class, name = "ReportCreated"),
+    JsonSubTypes.Type(value = ReportStatusChangedEvent::class, name = "ReportStatusChanged"),
+    JsonSubTypes.Type(value = DryRunCompletedEvent::class, name = "DryRunCompleted"),
+    JsonSubTypes.Type(value = IncidentCreatedEvent::class, name = "IncidentCreated"),
+    JsonSubTypes.Type(value = HeadlineCreatedEvent::class, name = "HeadlineCreated")
+)
+sealed interface DomainEvent {
+    val eventId: UUID
+    val eventType: String
+    val occurredAt: Instant
+    val correlationId: UUID
+    val causationId: UUID?
+    val payload: Map<String, Any>
+}
+
+abstract class BaseDomainEvent(
+    override val eventId: UUID = UUID.randomUUID(),
+    override val occurredAt: Instant = Instant.now(),
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    override val payload: Map<String, Any> = emptyMap()
+) : DomainEvent {
+    override val eventType: String = this.javaClass.simpleName
+}
+
+data class TransactionCreatedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val transactionId: UUID,
+    val userId: UUID,
+    val amountCents: Long,
+    val merchantId: String
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "transactionId" to transactionId,
+    "userId" to userId,
+    "amountCents" to amountCents,
+    "merchantId" to merchantId
+))
+
+data class TransactionStateChangedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val transactionId: UUID,
+    val fromStatus: String?,
+    val toStatus: String,
+    val reason: String?
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "transactionId" to transactionId,
+    "fromStatus" to fromStatus,
+    "toStatus" to toStatus,
+    "reason" to reason
+))
+
+data class RiskEvaluationCompletedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val transactionId: UUID,
+    val riskScore: Int,
+    val decision: String,
+    val triggeredRules: List<Map<String, Any>>
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "transactionId" to transactionId,
+    "riskScore" to riskScore,
+    "decision" to decision,
+    "triggeredRules" to triggeredRules
+))
+
+data class SimulationCompletedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val simulationId: UUID,
+    val scenarioId: UUID,
+    val detected: Boolean,
+    val durationMs: Long
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "simulationId" to simulationId,
+    "scenarioId" to scenarioId,
+    "detected" to detected,
+    "durationMs" to durationMs
+))
+
+data class ReportCreatedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val reportId: UUID,
+    val type: String,
+    val severity: String?,
+    val component: String?,
+    val reporterId: UUID
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "reportId" to reportId,
+    "type" to type,
+    "severity" to severity,
+    "component" to component,
+    "reporterId" to reporterId
+))
+
+data class ReportStatusChangedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val reportId: UUID,
+    val fromStatus: String,
+    val toStatus: String,
+    val changedBy: UUID
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "reportId" to reportId,
+    "fromStatus" to fromStatus,
+    "toStatus" to toStatus,
+    "changedBy" to changedBy
+))
+
+data class DryRunCompletedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val dryRunId: UUID,
+    val reportId: UUID?,
+    val transactionsTested: Int,
+    val falsePositiveDelta: Int,
+    val falseNegativeDelta: Int
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "dryRunId" to dryRunId,
+    "reportId" to reportId,
+    "transactionsTested" to transactionsTested,
+    "falsePositiveDelta" to falsePositiveDelta,
+    "falseNegativeDelta" to falseNegativeDelta
+))
+
+data class IncidentCreatedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val incidentId: UUID,
+    val type: String,
+    val severity: String,
+    val title: String
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "incidentId" to incidentId,
+    "type" to type,
+    "severity" to severity,
+    "title" to title
+))
+
+data class HeadlineCreatedEvent(
+    override val correlationId: UUID,
+    override val causationId: UUID? = null,
+    val headlineId: UUID,
+    val title: String,
+    val reportCount: Int,
+    val affectedComponent: String?
+) : BaseDomainEvent(correlationId = correlationId, causationId = causationId, payload = mapOf(
+    "headlineId" to headlineId,
+    "title" to title,
+    "reportCount" to reportCount,
+    "affectedComponent" to affectedComponent
+))
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\event\EventPublisher.kt =====
+package com.sentinelx.shared.event
+
+import org.springframework.context.ApplicationEventPublisher
+import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.stereotype.Component
+
+@Component
+class EventPublisher(
+    private val applicationEventPublisher: ApplicationEventPublisher,
+    private val kafkaTemplate: KafkaTemplate<String, DomainEvent>?
+) {
+    fun publish(event: DomainEvent) {
+        applicationEventPublisher.publishEvent(event)
+        
+        kafkaTemplate?.send("sentinelx.events", event.eventId.toString(), event)
+            ?.addCallback(
+                { result -> 
+                    // Log success if needed
+                },
+                { ex -> 
+                    // Log failure but don't throw - event already published locally
+                }
+            )
+    }
+
+    fun publishAll(events: List<DomainEvent>) {
+        events.forEach(::publish)
+    }
+}
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\kernel\SentinelExceptions.kt =====
+package com.sentinelx.shared.kernel
+
+import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.ResponseStatus
+
+@ResponseStatus(HttpStatus.BAD_REQUEST)
+class BadRequestException(message: String) : RuntimeException(message)
+
+@ResponseStatus(HttpStatus.UNAUTHORIZED)
+class UnauthorizedException(message: String = "Unauthorized") : RuntimeException(message)
+
+@ResponseStatus(HttpStatus.FORBIDDEN)
+class ForbiddenException(message: String = "Forbidden") : RuntimeException(message)
+
+@ResponseStatus(HttpStatus.NOT_FOUND)
+class NotFoundException(message: String) : RuntimeException(message)
+
+@ResponseStatus(HttpStatus.CONFLICT)
+class ConflictException(message: String) : RuntimeException(message)
+
+@ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+class ValidationException(message: String, val errors: Map<String, String> = emptyMap()) : RuntimeException(message)
+
+@ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
+class RateLimitException(message: String = "Rate limit exceeded") : RuntimeException(message)
+
+@ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+class InternalServerException(message: String) : RuntimeException(message)
+
+class IdempotencyConflictException(
+    message: String = "Request with this idempotency key already processed"
+) : ConflictException(message)
+
+class InvalidStateTransitionException(
+    message: String
+) : BadRequestException(message)
+
+class BusinessRuleViolationException(
+    message: String,
+    val ruleCode: String
+) : BadRequestException(message)
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\security\JwtAuthenticationFilter.kt =====
+package com.sentinelx.shared.security
+
+import jakarta.servlet.FilterChain
+import jakarta.servlet.ServletException
+import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletResponse
+import org.springframework.lang.NonNull
+import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource
+import org.springframework.stereotype.Component
+import org.springframework.web.filter.OncePerRequestFilter
+import java.io.IOException
+
+@Component
+class JwtAuthenticationFilter(
+    private val jwtTokenProvider: JwtTokenProvider
+) : OncePerRequestFilter() {
+
+    companion object {
+        const val AUTH_HEADER = "Authorization"
+        const val BEARER_PREFIX = "Bearer "
+    }
+
+    @Throws(ServletException::class, IOException::class)
+    override fun doFilterInternal(
+        @NonNull request: HttpServletRequest,
+        @NonNull response: HttpServletResponse,
+        @NonNull filterChain: FilterChain
+    ) {
+        val token = extractToken(request)
+        
+        if (token != null && jwtTokenProvider.validateToken(token) && jwtTokenProvider.isAccessToken(token)) {
+            val authentication = jwtTokenProvider.getAuthentication(token)
+            authentication.details = WebAuthenticationDetailsSource().buildDetails(request)
+            SecurityContextHolder.getContext().authentication = authentication
+        }
+
+        filterChain.doFilter(request, response)
+    }
+
+    private fun extractToken(request: HttpServletRequest): String? {
+        val header = request.getHeader(AUTH_HEADER)
+        return if (header != null && header.startsWith(BEARER_PREFIX)) {
+            header.substring(BEARER_PREFIX.length)
+        } else null
+    }
+
+    override fun shouldNotFilter(request: HttpServletRequest): Boolean {
+        val path = request.requestURI
+        return path.startsWith("/actuator/") ||
+               path.startsWith("/api/auth/") ||
+               path.startsWith("/api/public/") ||
+               path == "/api/health"
+    }
+}
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\security\JwtTokenProvider.kt =====
+package com.sentinelx.shared.security
+
+import io.jsonwebtoken.Claims
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.security.Keys
+import jakarta.annotation.PostConstruct
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.Authentication
+import org.springframework.security.core.GrantedAuthority
+import org.springframework.security.core.authority.SimpleGrantedAuthority
+import org.springframework.stereotype.Component
+import java.nio.charset.StandardCharsets
+import java.security.Key
+import java.time.Instant
+import java.util.Date
+import java.util.stream.Collectors
+
+@Component
+class JwtTokenProvider(
+    @Value("\${sentinelx.jwt.secret}") private val secret: String,
+    @Value("\${sentinelx.jwt.expiration-ms:86400000}") private val expirationMs: Long,
+    @Value("\${sentinelx.jwt.refresh-expiration-ms:604800000}") private val refreshExpirationMs: Long
+) {
+    private var key: Key? = null
+
+    @PostConstruct
+    fun init() {
+        key = Keys.hmacShaKeyFor(secret.toByteArray(StandardCharsets.UTF_8))
+    }
+
+    fun generateAccessToken(authentication: Authentication): String {
+        val authorities = authentication.authorities.map { it.authority }.joinToString(",")
+        val now = Instant.now()
+        val expiry = now.plusMillis(expirationMs)
+
+        return Jwts.builder()
+            .subject(authentication.name)
+            .claim("authorities", authorities)
+            .claim("type", "access")
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(expiry))
+            .signWith(key!!)
+            .compact()
+    }
+
+    fun generateRefreshToken(username: String): String {
+        val now = Instant.now()
+        val expiry = now.plusMillis(refreshExpirationMs)
+
+        return Jwts.builder()
+            .subject(username)
+            .claim("type", "refresh")
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(expiry))
+            .signWith(key!!)
+            .compact()
+    }
+
+    fun validateToken(token: String): Boolean {
+        try {
+            Jwts.parser().verifyWith(key!!).build().parseSignedClaims(token)
+            return true
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    fun getUsername(token: String): String {
+        return getClaims(token).subject
+    }
+
+    fun getAuthorities(token: String): List<GrantedAuthority> {
+        val claims = getClaims(token)
+        val authorities = claims.get("authorities", String::class.java) ?: ""
+        return authorities.split(",")
+            .filter { it.isNotBlank() }
+            .map { SimpleGrantedAuthority(it) }
+    }
+
+    fun getTokenType(token: String): String {
+        return getClaims(token).get("type", String::class.java) ?: "access"
+    }
+
+    fun isAccessToken(token: String): Boolean = getTokenType(token) == "access"
+    fun isRefreshToken(token: String): Boolean = getTokenType(token) == "refresh"
+
+    fun getExpiration(token: String): Instant {
+        return getClaims(token).expiration.toInstant()
+    }
+
+    private fun getClaims(token: String): Claims {
+        return Jwts.parser().verifyWith(key!!).build().parseSignedClaims(token).payload
+    }
+
+    fun getAuthentication(token: String): Authentication {
+        val username = getUsername(token)
+        val authorities = getAuthorities(token)
+        return UsernamePasswordAuthenticationToken(username, null, authorities)
+    }
+}
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\security\SecurityConfig.kt =====
+package com.sentinelx.shared.security
+
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
+import org.springframework.security.authentication.AuthenticationManager
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
+import org.springframework.security.config.annotation.web.builders.HttpSecurity
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer
+import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder
+import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.web.cors.CorsConfiguration
+import org.springframework.web.cors.CorsConfigurationSource
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity(prePostEnabled = true, securedEnabled = true, jsr250Enabled = true)
+class SecurityConfig(
+    private val jwtAuthenticationFilter: JwtAuthenticationFilter
+) {
+
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors { it.configurationSource(corsConfigurationSource()) }
+            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .authorizeHttpRequests { auth ->
+                auth
+                    .requestMatchers("/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
+                    .requestMatchers("/api/auth/**").permitAll()
+                    .requestMatchers("/api/public/**").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/community/**").permitAll()
+                    .anyRequest().authenticated()
+            }
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
+            .exceptionHandling { it
+                .authenticationEntryPoint { _, response, _ ->
+                    response.status = 401
+                    response.contentType = "application/json"
+                    response.writer.write("""{"success":false,"error":{"code":"UNAUTHORIZED","message":"Authentication required"}}""")
+                }
+                .accessDeniedHandler { _, response, _ ->
+                    response.status = 403
+                    response.contentType = "application/json"
+                    response.writer.write("""{"success":false,"error":{"code":"FORBIDDEN","message":"Access denied"}}""")
+                }
+            }
+        return http.build()
+    }
+
+    @Bean
+    fun corsConfigurationSource(): CorsConfigurationSource {
+        val configuration = CorsConfiguration().apply {
+            allowedOrigins = listOf("http://localhost:3000", "http://127.0.0.1:3000")
+            allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+            allowedHeaders = listOf("*")
+            allowCredentials = true
+            maxAge = 3600L
+        }
+        val source = UrlBasedCorsConfigurationSource()
+        source.registerCorsConfiguration("/**", configuration)
+        return source
+    }
+
+    @Bean
+    fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder(12)
+
+    @Bean
+    fun authenticationManager(configuration: AuthenticationConfiguration): AuthenticationManager =
+        configuration.authenticationManager
+}
+
+===== .\sentinelx-shared\src\main\kotlin\com\sentinelx\shared\util\IdempotencyService.kt =====
+package com.sentinelx.shared.util
+
+import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.stereotype.Service
+import java.time.Duration
+
+@Service
+class IdempotencyService(
+    private val redisTemplate: RedisTemplate<String, String>
+) {
+    companion object {
+        const val IDEMPOTENCY_PREFIX = "idempotency:"
+        const val DEFAULT_TTL_SECONDS: Long = 86400L // 24 hours
+    }
+
+    fun tryAcquire(
+        idempotencyKey: String,
+        ttlSeconds: Long = DEFAULT_TTL_SECONDS
+    ): Boolean {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+        val result = redisTemplate.opsForValue().setIfAbsent(
+            key,
+            "processing",
+            Duration.ofSeconds(ttlSeconds)
+        )
+        return result == true
+    }
+
+    fun complete(
+        idempotencyKey: String,
+        result: String,
+        ttlSeconds: Long = DEFAULT_TTL_SECONDS
+    ) {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+        redisTemplate.opsForValue().set(
+            key,
+            result,
+            Duration.ofSeconds(ttlSeconds)
+        )
+    }
+
+    fun getResult(idempotencyKey: String): String? {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+        return redisTemplate.opsForValue().get(key)
+    }
+
+    fun isProcessing(idempotencyKey: String): Boolean {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+        val value = redisTemplate.opsForValue().get(key)
+        return value == "processing"
+    }
+
+    fun release(idempotencyKey: String) {
+        val key = "$IDEMPOTENCY_PREFIX$idempotencyKey"
+        redisTemplate.delete(key)
+    }
+}

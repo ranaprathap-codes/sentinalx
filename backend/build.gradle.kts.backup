@@ -1,0 +1,61 @@
+plugins {
+    id("org.springframework.boot") version "3.3.2" apply false
+    id("io.spring.dependency-management") version "1.1.6" apply false
+    id("org.flywaydb.flyway") version "10.21.0" apply false
+    kotlin("jvm") version "1.9.24" apply false
+    kotlin("plugin.spring") version "1.9.24" apply false
+    kotlin("plugin.jpa") version "1.9.24" apply false
+    id("com.diffplug.spotless") version "6.25.0" apply false
+}
+
+allprojects {
+    group = "com.sentinelx"
+    version = "0.1.0-SNAPSHOT"
+
+    repositories {
+        mavenCentral()
+        maven { url = uri("https://repo.spring.io/milestone") }
+        maven { url = uri("https://repo.spring.io/snapshot") }
+    }
+}
+
+subprojects {
+    apply(plugin = "kotlin")
+    apply(plugin = "kotlin-jvm")
+    apply(plugin = "kotlin-plugin-spring")
+    apply(plugin = "kotlin-plugin-jpa")
+
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(21))
+        }
+    }
+
+    tasks.withType<KotlinCompile> {
+        kotlinOptions {
+            freeCompilerArgs = listOf("-Xjsr305=strict", "-Xopt-in=kotlin.RequiresOptIn")
+            jvmTarget = "21"
+        }
+    }
+
+    dependencies {
+        // Test dependencies
+        testImplementation(platform("org.junit:junit-bom:5.11.0"))
+        testImplementation("org.junit.jupiter:junit-jupiter")
+        testImplementation("org.mockito:mockito-junit-jupiter")
+        testImplementation("org.mockito:mockito-kotlin")
+        testImplementation("org.springframework.boot:spring-boot-starter-test")
+        testImplementation("org.testcontainers:junit-jupiter")
+        testImplementation("org.testcontainers:postgresql")
+        testImplementation("org.testcontainers:redis")
+        testImplementation("org.testcontainers:kafka")
+
+        // Testcontainers
+        testImplementation("org.testcontainers:testcontainers-bom:1.20.1")
+    }
+
+    tasks.withType<Test> {
+        useJUnitPlatform()
+        systemProperty("spring.profiles.active", "test")
+    }
+}
