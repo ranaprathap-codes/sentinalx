@@ -103,8 +103,8 @@ class DeterministicRiskEngine(
 
     private fun evaluateCondition(node: com.fasterxml.jackson.databind.JsonNode, context: EvaluationContext): Boolean {
         return when (node["operator"]?.asText()) {
-            "AND" -> node["conditions"]?.elements()?.all { evaluateCondition(it, context) } == true
-            "OR" -> node["conditions"]?.elements()?.any { evaluateCondition(it, context) } == true
+            "AND" -> node["conditions"]?.elements()?.asSequence()?.all { evaluateCondition(it, context) } == true
+            "OR" -> node["conditions"]?.elements()?.asSequence()?.any { evaluateCondition(it, context) } == true
             "NOT" -> !evaluateCondition(node["condition"]!!, context)
             else -> evaluateLeafCondition(node, context)
         }

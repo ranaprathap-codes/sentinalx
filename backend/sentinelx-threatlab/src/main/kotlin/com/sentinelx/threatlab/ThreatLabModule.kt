@@ -1,6 +1,8 @@
 package com.sentinelx.threatlab
 
-import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.Configuration
 
-@SpringBootApplication(scanBasePackages = ["com.sentinelx.threatlab"])
+@Configuration
+@ComponentScan(basePackages = ["com.sentinelx.threatlab"])
 class ThreatLabModule

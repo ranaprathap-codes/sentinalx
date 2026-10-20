@@ -1,6 +1,8 @@
 package com.sentinelx.dryrun
 
-import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.Configuration
 
-@SpringBootApplication(scanBasePackages = ["com.sentinelx.dryrun"])
+@Configuration
+@ComponentScan(basePackages = ["com.sentinelx.dryrun"])
 class DryRunModule

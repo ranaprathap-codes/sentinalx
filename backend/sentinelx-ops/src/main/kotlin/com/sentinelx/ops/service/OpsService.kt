@@ -2,7 +2,6 @@ package com.sentinelx.ops.service
 
 import com.sentinelx.auth.domain.User
 import com.sentinelx.ops.domain.Incident
-import com.sentinelx.ops.domain.IncidentStatus
 import com.sentinelx.ops.dto.AcknowledgeIncidentRequest
 import com.sentinelx.ops.dto.IncidentListResponse
 import com.sentinelx.ops.dto.IncidentResponse
@@ -113,7 +112,7 @@ class OpsService(
             com.sentinelx.ops.dto.ServiceHealthResponse("threatlab", "UP", 156.0, 0.0, Instant.now().toString()),
             com.sentinelx.ops.dto.ServiceHealthResponse("database", "UP", 8.0, 0.0, Instant.now().toString()),
             com.sentinelx.ops.dto.ServiceHealthResponse("redis", "UP", 2.0, 0.0, Instant.now().toString()),
-            com.sentinelx.ops.dto.ServiceHealthService("kafka", "UP", 5.0, 0.0, Instant.now().toString())
+            com.sentinelx.ops.dto.ServiceHealthResponse("kafka", "UP", 5.0, 0.0, Instant.now().toString())
         )
     }
 

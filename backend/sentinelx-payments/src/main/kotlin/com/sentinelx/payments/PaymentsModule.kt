@@ -1,6 +1,8 @@
 package com.sentinelx.payments
 
-import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.Configuration
 
-@SpringBootApplication(scanBasePackages = ["com.sentinelx.payments"])
+@Configuration
+@ComponentScan(basePackages = ["com.sentinelx.payments"])
 class PaymentsModule

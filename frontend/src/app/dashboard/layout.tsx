@@ -1,15 +1,16 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Shield, Zap, FlaskConical, Bug, Users, BarChart3, Terminal, Settings, LogOut, Menu, X, ChevronRight } from 'lucide-react'
+import { Shield, Zap, FlaskConical, Bug, Users, BarChart3, Terminal, Settings, LogOut, Menu, Sparkles } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Shield },
+  { name: 'AI Copilot', href: '/dashboard/ai', icon: Sparkles },
   { name: 'Payments', href: '/payments', icon: Zap },
   { name: 'Risk Engine', href: '/risk', icon: Shield },
   { name: 'Threat Lab', href: '/threatlab', icon: FlaskConical },
@@ -67,7 +68,7 @@ export default function DashboardLayout({
             {navigation
               .filter((item) => !item.adminOnly || user?.role === 'ADMIN')
               .map((item) => {
-                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'))
                 return (
                   <Link
                     key={item.name}
@@ -120,7 +121,7 @@ export default function DashboardLayout({
                 <Menu className="h-5 w-5" />
               </Button>
               <h1 className="text-lg font-semibold text-white hidden sm:block">
-                {navigation.find((n) => pathname === n.href || pathname.startsWith(n.href + '/'))?.name || 'Dashboard'}
+                {navigation.find((n) => pathname === n.href || (n.href !== '/dashboard' && pathname.startsWith(n.href + '/')) )?.name || 'Dashboard'}
               </h1>
             </div>
 
@@ -172,5 +173,3 @@ export default function DashboardLayout({
     </div>
   )
 }
-
-import { useState } from 'react'

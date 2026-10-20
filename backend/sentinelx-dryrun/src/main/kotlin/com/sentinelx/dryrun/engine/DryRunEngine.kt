@@ -6,7 +6,6 @@ import com.sentinelx.dryrun.dto.ScoreChangeSummary
 import com.sentinelx.dryrun.dto.TransactionComparison
 import com.sentinelx.payments.domain.Transaction
 import com.sentinelx.payments.repository.TransactionRepository
-import com.sentinelx.risk.domain.RiskDecision
 import com.sentinelx.risk.domain.RiskRule
 import com.sentinelx.risk.engine.DeterministicRiskEngine
 import com.sentinelx.risk.repository.RiskRuleRepository
@@ -64,7 +63,7 @@ class DryRunEngine(
         // Update dry run entity
         dryRun.baselineResultJson = objectMapper.writeValueAsString(baselineResults.map { it.toJson() })
         dryRun.proposedResultJson = objectMapper.writeValueAsString(proposedResults.map { it.toJson() })
-        dryRun.diffJson = objectMapper.writeValueAsString(comparison.map { it.toJson() })
+        dryRun.diffJson = objectMapper.writeValueAsString(comparison)
         dryRun.transactionsTested = testTransactions.size
         dryRun.falsePositiveDelta = summary.falsePositiveDelta
         dryRun.falseNegativeDelta = summary.falseNegativeDelta
@@ -86,12 +85,6 @@ class DryRunEngine(
     }
 
     private fun getTestTransactions(dryRun: DryRun): List<Transaction> {
-        if (dryRun.reportId != null) {
-            // If linked to a report, get related transactions
-            return transactionRepository.findAll().filter { tx ->
-                dryRun.reportId!! in (tx.id::class.java) // Simplified - would use related_transaction_ids
-            }
-        }
         // Default: last 1000 transactions
         return transactionRepository.findAll().take(1000)
     }
@@ -187,7 +180,7 @@ class DryRunEngine(
         )
     }
 
-    private data class EvaluationResult(
+    private inner class EvaluationResult(
         val transactionId: UUID,
         val score: Int,
         val decision: RiskDecision,

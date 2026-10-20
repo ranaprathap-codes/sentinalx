@@ -1,6 +1,8 @@
 package com.sentinelx.risk
 
-import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.Configuration
 
-@SpringBootApplication(scanBasePackages = ["com.sentinelx.risk"])
+@Configuration
+@ComponentScan(basePackages = ["com.sentinelx.risk"])
 class RiskModule

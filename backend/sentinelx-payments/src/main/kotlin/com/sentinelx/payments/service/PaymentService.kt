@@ -17,6 +17,7 @@ import com.sentinelx.shared.event.TransactionStateChangedEvent
 import com.sentinelx.shared.kernel.ApiResponse
 import com.sentinelx.shared.kernel.BadRequestException
 import com.sentinelx.shared.kernel.ConflictException
+import com.sentinelx.shared.kernel.ForbiddenException
 import com.sentinelx.shared.kernel.IdempotencyConflictException
 import com.sentinelx.shared.kernel.NotFoundException
 import com.sentinelx.shared.util.IdempotencyService
@@ -84,25 +85,37 @@ class PaymentService(
         return toPaymentResponse(savedTransaction)
     }
 
-    fun getPayment(transactionId: UUID): PaymentResponse {
+    fun getPayment(transactionId: UUID, requestingUserId: UUID? = null, isAdmin: Boolean = false): PaymentResponse {
         val transaction = transactionRepository.findById(transactionId)
             .orElseThrow { NotFoundException("Payment not found: $transactionId") }
+
+        if (requestingUserId != null && !isAdmin && transaction.userId != requestingUserId) {
+            throw ForbiddenException("Access denied: You do not own this payment")
+        }
+
         return toPaymentResponse(transaction)
     }
 
     fun getPaymentByIdempotencyKey(idempotencyKey: String): PaymentResponse {
         val transaction = transactionRepository.findByIdempotencyKey(idempotencyKey)
-            .orElseThrow { NotFoundException("Payment not found for idempotency key: $idempotencyKey") }
+            ?: throw NotFoundException("Payment not found for idempotency key: $idempotencyKey")
         return toPaymentResponse(transaction)
     }
 
     fun getUserPayments(userId: UUID, page: Int, size: Int): Page<PaymentResponse> {
         val pageable = PageRequest.of(page, size.coerceAtMost(100))
-        return transactionRepository.findByUserIdOrderByCreatedAtDesc(userId)
+        return transactionRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
             .map { toPaymentResponse(it) }
     }
 
-    fun getPaymentHistory(transactionId: UUID): List<PaymentStateHistoryResponse> {
+    fun getPaymentHistory(transactionId: UUID, requestingUserId: UUID? = null, isAdmin: Boolean = false): List<PaymentStateHistoryResponse> {
+        val transaction = transactionRepository.findById(transactionId)
+            .orElseThrow { NotFoundException("Payment not found: $transactionId") }
+
+        if (requestingUserId != null && !isAdmin && transaction.userId != requestingUserId) {
+            throw ForbiddenException("Access denied: You do not own this payment")
+        }
+
         return stateHistoryRepository.findByTransactionIdOrderByCreatedAtAsc(transactionId)
             .map { toHistoryResponse(it) }
     }
@@ -159,11 +172,13 @@ class PaymentService(
             else -> throw BadRequestException("Invalid risk decision: $decision")
         }
 
-        TransactionStateMachine.validateTransition(transaction.status, newStatus)
+        // BUG-05 FIX: Capture fromStatus before mutating transaction.status
+        val fromStatus = transaction.status
+        TransactionStateMachine.validateTransition(fromStatus, newStatus)
         transaction.status = newStatus
         
         val savedTransaction = transactionRepository.save(transaction)
-        recordStateChange(savedTransaction, transaction.status, newStatus, "Risk engine decision: $decision (score: $riskScore)", "RISK_ENGINE")
+        recordStateChange(savedTransaction, fromStatus, newStatus, "Risk engine decision: $decision (score: $riskScore)", "RISK_ENGINE")
 
         return toPaymentResponse(savedTransaction)
     }

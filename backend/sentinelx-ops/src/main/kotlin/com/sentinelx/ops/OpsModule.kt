@@ -1,6 +1,8 @@
 package com.sentinelx.ops
 
-import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.Configuration
 
-@SpringBootApplication(scanBasePackages = ["com.sentinelx.ops"])
+@Configuration
+@ComponentScan(basePackages = ["com.sentinelx.ops"])
 class OpsModule

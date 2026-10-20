@@ -1,6 +1,8 @@
 package com.sentinelx.ai
 
-import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.Configuration
 
-@SpringBootApplication(scanBasePackages = ["com.sentinelx.ai"])
+@Configuration
+@ComponentScan(basePackages = ["com.sentinelx.ai"])
 class AiModule

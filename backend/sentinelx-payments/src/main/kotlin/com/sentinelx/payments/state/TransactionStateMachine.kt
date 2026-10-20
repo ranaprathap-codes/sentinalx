@@ -8,7 +8,7 @@ object TransactionStateMachine {
     private val validTransitions: Map<TransactionStatus, Set<TransactionStatus>> = mapOf(
         TransactionStatus.CREATED to setOf(TransactionStatus.PROCESSING, TransactionStatus.CANCELLED, TransactionStatus.FAILED),
         TransactionStatus.PROCESSING to setOf(TransactionStatus.RISK_REVIEW, TransactionStatus.AUTHORIZED, TransactionStatus.BLOCKED, TransactionStatus.FAILED, TransactionStatus.CANCELLED),
-        TransactionStatus.RISK_REVIEW to setOf(TransactionStatus.AUTHORIZED, TransactionStatus.BLOCKED, TransactionStatus.REVIEW, TransactionStatus.FAILED),
+        TransactionStatus.RISK_REVIEW to setOf(TransactionStatus.AUTHORIZED, TransactionStatus.BLOCKED, TransactionStatus.FAILED),
         TransactionStatus.AUTHORIZED to setOf(TransactionStatus.COMPLETED, TransactionStatus.FAILED, TransactionStatus.CANCELLED),
         TransactionStatus.COMPLETED to setOf(TransactionStatus.REFUNDED),
         TransactionStatus.BLOCKED to setOf(),

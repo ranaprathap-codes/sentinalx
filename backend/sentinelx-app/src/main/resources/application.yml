@@ -76,9 +76,14 @@ sentinelx:
     refresh-expiration-ms: 604800000
   idempotency:
     ttl-seconds: 86400
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   ai:
-    enabled: ${AI_ENABLED:false}
-    provider: ${AI_PROVIDER:ollama}
+    enabled: ${AI_ENABLED:true}
+    provider: ${AI_PROVIDER:gemini}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_MODEL:gemini-3.8-flash}
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       model: ${OLLAMA_MODEL:llama3.1}

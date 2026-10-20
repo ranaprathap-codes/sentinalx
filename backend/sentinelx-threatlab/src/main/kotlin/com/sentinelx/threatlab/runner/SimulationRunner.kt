@@ -2,11 +2,11 @@ package com.sentinelx.threatlab.runner
 
 import com.sentinelx.payments.domain.Transaction
 import com.sentinelx.payments.repository.TransactionRepository
-import com.sentinelx.risk.domain.RiskDecision
 import com.sentinelx.risk.service.RiskService
 import com.sentinelx.threatlab.domain.SimulationRun
 import com.sentinelx.threatlab.domain.ThreatScenario
 import com.sentinelx.shared.domain.SimulationStatus
+import com.sentinelx.shared.domain.RiskDecision
 import com.sentinelx.shared.event.DomainEvent
 import com.sentinelx.shared.event.EventPublisher
 import com.sentinelx.shared.event.SimulationCompletedEvent
@@ -122,15 +122,15 @@ class SimulationRunner(
             
             // Create transaction
             val transaction = Transaction(
-                idempotencyKey = "sim_${scenario.id}_${simulationId}_$i",
+                idempotencyKey = "sim_${scenario.id}_${correlationId}_$i",
                 userId = syntheticUserId,
                 amountCents = txAmount,
                 merchantId = merchantId,
                 correlationId = correlationId
             ).apply {
-                deviceId = deviceId
-                locationCountry = locationCountry
-                metadata = objectMapper.writeValueAsString(mapOf("simulation" to true, "scenarioId" to scenario.id.toString()))
+                this.deviceId = deviceId
+                this.locationCountry = locationCountry
+                this.metadata = objectMapper.writeValueAsString(mapOf("simulation" to true, "scenarioId" to scenario.id.toString()))
             }
 
             val savedTx = transactionRepository.save(transaction)
@@ -153,7 +153,7 @@ class SimulationRunner(
         }
 
         result.put("transactionsProcessed", transactionCount)
-        result.set("transactions", objectMapper.valueToTree(transactions))
+        result.set<JsonNode>("transactions", objectMapper.valueToTree(transactions))
         result.put("scenarioId", scenario.id.toString())
         result.put("timestamp", Instant.now().toString())
 
@@ -161,10 +161,10 @@ class SimulationRunner(
     }
 
     private fun mergeInputTemplate(template: JsonNode, overrides: Map<String, Any>): JsonNode {
-        val merged = objectMapper.valueToTree(template)
+        val merged: JsonNode = objectMapper.valueToTree(template)
         if (merged is ObjectNode) {
             overrides.forEach { (key, value) ->
-                merged.set(key, objectMapper.valueToTree(value))
+            merged.set<JsonNode>(key, objectMapper.valueToTree(value))
             }
         }
         return merged
@@ -172,7 +172,7 @@ class SimulationRunner(
 
     private fun compareResults(actual: JsonNode, expected: JsonNode, logs: MutableList<String>): Boolean {
         // Simple comparison - in production, use more sophisticated matching
-        val actualDetected = actual["transactions"]?.elements()?.any { 
+        val actualDetected = actual["transactions"]?.elements()?.asSequence()?.any {
             it["decision"]?.asText() == RiskDecision.BLOCK.name || it["decision"]?.asText() == RiskDecision.REVIEW.name
         } ?: false
 

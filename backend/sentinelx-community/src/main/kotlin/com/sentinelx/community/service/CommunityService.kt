@@ -1,5 +1,6 @@
 package com.sentinelx.community.service
 
+import com.fasterxml.jackson.core.type.TypeReference
 import com.sentinelx.auth.domain.User
 import com.sentinelx.community.domain.Comment
 import com.sentinelx.community.domain.CommunityHeadline
@@ -9,6 +10,7 @@ import com.sentinelx.community.dto.CommentResponse
 import com.sentinelx.community.dto.CommunityHeadlineResponse
 import com.sentinelx.community.dto.CreateCommentRequest
 import com.sentinelx.community.dto.CreateReportRequest
+import com.sentinelx.community.dto.HeadlineListResponse
 import com.sentinelx.community.dto.ReportListResponse
 import com.sentinelx.community.dto.ReportResponse
 import com.sentinelx.community.dto.UpdateReportRequest
@@ -146,7 +148,7 @@ class CommunityService(
                 val statuses = listOf(status)
                 reportRepository.findByTypeAndStatusIn(type, statuses, pageable)
             }
-            type != null -> reportRepository.findByType(type).map { reportRepository.findByType(type) }.getOrElse { emptyList() }?.let { pageResultFromList(it, pageable) }
+            type != null -> pageResultFromList(reportRepository.findByType(type), pageable)
             status != null -> reportRepository.findByStatusIn(listOf(status), pageable)
             tag != null -> pageResultFromList(reportRepository.findByTag(tag), pageable)
             reporterId != null -> reportRepository.findByReporterIdOrderByCreatedAtDesc(reporterId, pageable)
@@ -194,7 +196,7 @@ class CommunityService(
         )
 
         val saved = commentRepository.save(comment)
-        return toCommentResponse(saved, user.fullName, user.role.name, emptyList())
+        return toCommentResponse(saved, user.fullName ?: user.email, user.role.name, emptyList())
     }
 
     fun getComments(reportId: UUID): List<CommentResponse> {
@@ -364,7 +366,10 @@ class CommunityService(
             reporterName = reporterName,
             assigneeId = report.assigneeId,
             assigneeName = assigneeName,
-            evidenceJson = com.fasterxml.jackson.databind.ObjectMapper().readValue(report.evidenceJson),
+            evidenceJson = com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                report.evidenceJson,
+                object : TypeReference<Map<String, Any>>() {}
+            ),
             reproductionSteps = report.reproductionSteps,
             expectedBehavior = report.expectedBehavior,
             actualBehavior = report.actualBehavior,
@@ -404,7 +409,7 @@ class CommunityService(
         val start = pageable.offset.toInt()
         val end = (start + pageable.pageSize).coerceAtMost(list.size)
         val pageContent = list.subList(start, end)
-        return org.springframework.data.domain.PageImpl(pageContent, pageable, list.size)
+        return org.springframework.data.domain.PageImpl(pageContent, pageable, list.size.toLong())
     }
 
     private fun getUserById(userId: UUID): User? {

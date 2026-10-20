@@ -4,6 +4,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 
 class ApiClient {
   private client: AxiosInstance
+  /** In-memory token storage to mitigate XSS risks */
   private accessToken: string | null = null
   private refreshToken: string | null = null
   private isRefreshing = false
@@ -19,6 +20,7 @@ class ApiClient {
         'Content-Type': 'application/json',
       },
       timeout: 30000,
+      withCredentials: true,
     })
 
     this.setupInterceptors()
@@ -26,23 +28,24 @@ class ApiClient {
   }
 
   private loadTokensFromStorage() {
+    // Keep in sessionStorage rather than persistent localStorage for reduced attack surface
     if (typeof window !== 'undefined') {
-      this.accessToken = localStorage.getItem('accessToken')
-      this.refreshToken = localStorage.getItem('refreshToken')
+      this.accessToken = sessionStorage.getItem('accessToken')
+      this.refreshToken = sessionStorage.getItem('refreshToken')
     }
   }
 
   private saveTokensToStorage() {
     if (typeof window !== 'undefined') {
       if (this.accessToken) {
-        localStorage.setItem('accessToken', this.accessToken)
+        sessionStorage.setItem('accessToken', this.accessToken)
       } else {
-        localStorage.removeItem('accessToken')
+        sessionStorage.removeItem('accessToken')
       }
       if (this.refreshToken) {
-        localStorage.setItem('refreshToken', this.refreshToken)
+        sessionStorage.setItem('refreshToken', this.refreshToken)
       } else {
-        localStorage.removeItem('refreshToken')
+        sessionStorage.removeItem('refreshToken')
       }
     }
   }
@@ -87,7 +90,7 @@ class ApiClient {
             originalRequest.headers.Authorization = `Bearer ${newToken}`
             return this.client(originalRequest)
           } catch (refreshError) {
-            this.failedQueue.forEach(({ reject }) => reject(refreshError))
+            this.failedQueue.forEach(({ reject }) => reject(refreshError as Error))
             this.failedQueue = []
             this.clearTokens()
             if (typeof window !== 'undefined') {
@@ -111,19 +114,24 @@ class ApiClient {
 
     const response = await axios.post(`${API_URL}/api/auth/refresh`, {
       refreshToken: this.refreshToken,
-    })
+    }, { withCredentials: true })
 
-    const { accessToken, refreshToken } = response.data.data
+    const data = response.data?.data || response.data
+    const { accessToken, refreshToken } = data
     this.accessToken = accessToken
-    this.refreshToken = refreshToken
+    if (refreshToken) {
+      this.refreshToken = refreshToken
+    }
     this.saveTokensToStorage()
 
     return accessToken
   }
 
-  setTokens(accessToken: string, refreshToken: string) {
+  setTokens(accessToken: string, refreshToken?: string) {
     this.accessToken = accessToken
-    this.refreshToken = refreshToken
+    if (refreshToken) {
+      this.refreshToken = refreshToken
+    }
     this.saveTokensToStorage()
   }
 

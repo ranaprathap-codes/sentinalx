@@ -14,10 +14,12 @@ import com.sentinelx.shared.security.JwtTokenProvider
 import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.Authentication
+import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.util.Locale
 
 @Service
 @Transactional
@@ -29,12 +31,13 @@ class AuthService(
 ) {
 
     fun register(request: RegisterRequest): AuthResponse {
-        if (userRepository.existsByEmail(request.email)) {
+        val normalizedEmail = request.email.trim().lowercase(Locale.ROOT)
+        if (userRepository.existsByEmail(normalizedEmail)) {
             throw ConflictException("Email already registered")
         }
 
         val user = User(
-            email = request.email.toLowerCase(),
+            email = normalizedEmail,
             passwordHash = passwordEncoder.encode(request.password),
             fullName = request.fullName
         )
@@ -44,15 +47,16 @@ class AuthService(
     }
 
     fun login(request: LoginRequest): AuthResponse {
+        val normalizedEmail = request.email.trim().lowercase(Locale.ROOT)
         val authentication = try {
             authenticationManager.authenticate(
-                UsernamePasswordAuthenticationToken(request.email.toLowerCase(), request.password)
+                UsernamePasswordAuthenticationToken(normalizedEmail, request.password)
             )
         } catch (e: Exception) {
             throw UnauthorizedException("Invalid email or password")
         }
 
-        val user = userRepository.findActiveByEmail(request.email.toLowerCase())
+        val user = userRepository.findActiveByEmail(normalizedEmail)
             ?: throw UnauthorizedException("Invalid email or password")
 
         user.lastLoginAt = Instant.now()
@@ -83,7 +87,11 @@ class AuthService(
     }
 
     private fun buildAuthResponse(user: User, authentication: Authentication? = null): AuthResponse {
-        val auth = authentication ?: UsernamePasswordAuthenticationToken(user.email, null, user.role.authority)
+        val auth = authentication ?: UsernamePasswordAuthenticationToken(
+            user.email,
+            null,
+            listOf(SimpleGrantedAuthority(user.role.authority))
+        )
         val accessToken = jwtTokenProvider.generateAccessToken(auth)
         val refreshToken = jwtTokenProvider.generateRefreshToken(user.email)
         

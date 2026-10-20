@@ -1,5 +1,7 @@
 package com.sentinelx.risk.service
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.sentinelx.payments.domain.Transaction
 import com.sentinelx.payments.repository.TransactionRepository
 import com.sentinelx.risk.domain.RiskEvaluation
@@ -16,9 +18,12 @@ import com.sentinelx.shared.domain.RiskDecision
 import com.sentinelx.shared.event.DomainEvent
 import com.sentinelx.shared.event.EventPublisher
 import com.sentinelx.shared.event.RiskEvaluationCompletedEvent
+import com.sentinelx.shared.kernel.ForbiddenException
 import com.sentinelx.shared.kernel.NotFoundException
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -42,7 +47,7 @@ class RiskService(
             return toResponse(existingEvaluation)
         }
 
-        // Build context from transaction and user history
+        // Build context from transaction using high-performance SQL aggregates
         val context = buildEvaluationContext(transaction)
         
         // Get active rules
@@ -75,8 +80,8 @@ class RiskService(
             transactionId = transaction.id,
             score = result.score,
             decision = result.decision,
-            triggeredRules = com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result.triggeredRules),
-            ruleScores = com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result.ruleScores)
+            triggeredRules = ObjectMapper().writeValueAsString(result.triggeredRules),
+            ruleScores = ObjectMapper().writeValueAsString(result.ruleScores)
         ).apply {
             evaluationDurationMs = result.evaluationDurationMs
             explanation = result.explanation
@@ -88,17 +93,30 @@ class RiskService(
         eventPublisher.publish(RiskEvaluationCompletedEvent(
             correlationId = transaction.correlationId,
             transactionId = transaction.id,
-            riskScore = result.score,
-            decision = result.decision.name,
-            triggeredRules = result.triggeredRules.map { it.toJson() }
+            riskScore = savedEvaluation.score,
+            decision = savedEvaluation.decision.name,
+            triggeredRules = result.triggeredRules.map {
+                mapOf(
+                    "ruleName" to it.ruleName,
+                    "score" to it.score
+                )
+            }
         ))
 
         return toResponse(savedEvaluation)
     }
 
-    fun getEvaluation(transactionId: UUID): RiskEvaluationResponse {
+    fun getEvaluation(transactionId: UUID, requestingUserId: UUID? = null, isAdmin: Boolean = false): RiskEvaluationResponse {
         val evaluation = riskEvaluationRepository.findByTransactionId(transactionId)
-            .orElseThrow { NotFoundException("Risk evaluation not found for transaction: $transactionId") }
+            ?: throw NotFoundException("Risk evaluation not found for transaction: $transactionId")
+
+        if (requestingUserId != null && !isAdmin) {
+            val transaction = transactionRepository.findById(transactionId).orElse(null)
+            if (transaction != null && transaction.userId != requestingUserId) {
+                throw ForbiddenException("Access denied: You do not own this risk evaluation")
+            }
+        }
+
         return toResponse(evaluation)
     }
 
@@ -207,38 +225,42 @@ class RiskService(
         val timeSinceLastTxMinutes: Long?
     )
 
+    /**
+     * BUG-03 FIX: High performance SQL aggregate evaluation instead of loading 1,000 entities in-memory.
+     */
     private fun buildEvaluationContext(transaction: Transaction): EvaluationContext {
-        val userTransactions = transactionRepository.findByUserIdOrderByCreatedAtDesc(transaction.userId)
-        
         val now = Instant.now()
         val oneHourAgo = now.minusSeconds(3600)
         val twentyFourHoursAgo = now.minusSeconds(86400)
+        val userId = transaction.userId
 
-        val recent1h = userTransactions.count { it.createdAt.isAfter(oneHourAgo) }
-        val recent24h = userTransactions.count { it.createdAt.isAfter(twentyFourHoursAgo) }
-        
-        val amounts = userTransactions.map { it.amountCents }
-        val avgAmount = if (amounts.isNotEmpty()) amounts.average().toLong() else transaction.amountCents
-        val maxAmount = if (amounts.isNotEmpty()) amounts.maxOrNull() ?: transaction.amountCents else transaction.amountCents
+        val recent1h = transactionRepository.countByUserIdAndCreatedAtAfter(userId, oneHourAgo).toInt()
+        val recent24h = transactionRepository.countByUserIdAndCreatedAtAfter(userId, twentyFourHoursAgo).toInt()
+        val avgAmount = transactionRepository.avgAmountByUserId(userId).toLong()
+        val maxAmount = transactionRepository.maxAmountByUserId(userId)
 
         val isNewDevice = transaction.deviceId?.let { deviceId ->
-            !userTransactions.any { it.deviceId == deviceId }
+            !transactionRepository.existsByUserIdAndDeviceId(userId, deviceId)
         } ?: false
 
         val isNewLocation = transaction.locationCountry?.let { country ->
-            !userTransactions.any { it.locationCountry == country }
+            !transactionRepository.existsByUserIdAndLocationCountry(userId, country)
         } ?: false
 
-        val lastTx = userTransactions.firstOrNull()
-        val timeSinceLastTx = lastTx?.let { 
-            java.time.Duration.between(it.createdAt, now).toMinutes() 
+        val lastTxPage = transactionRepository.findLastTransactionTime(
+            userId,
+            transaction.id,
+            PageRequest.of(0, 1)
+        )
+        val timeSinceLastTx = lastTxPage.content.firstOrNull()?.let {
+            Duration.between(it, now).toMinutes()
         }
 
         return EvaluationContext(
             userTransactionCount1h = recent1h,
             userTransactionCount24h = recent24h,
-            userAvgAmountCents = avgAmount,
-            userMaxAmountCents = maxAmount,
+            userAvgAmountCents = if (avgAmount > 0) avgAmount else transaction.amountCents,
+            userMaxAmountCents = if (maxAmount > 0) maxAmount else transaction.amountCents,
             isNewDevice = isNewDevice,
             isNewLocation = isNewLocation,
             timeSinceLastTxMinutes = timeSinceLastTx
@@ -246,10 +268,10 @@ class RiskService(
     }
 
     private fun toResponse(evaluation: RiskEvaluation): RiskEvaluationResponse {
-        val triggeredRules = com.fasterxml.jackson.databind.ObjectMapper()
-            .readValue(evaluation.triggeredRules, com.fasterxml.jackson.core.type.TypeReference<List<TriggeredRuleDto>>())
-        val ruleScores = com.fasterxml.jackson.databind.ObjectMapper()
-            .readValue(evaluation.ruleScores, com.fasterxml.jackson.core.type.TypeReference<Map<String, Int>>())
+        val triggeredRules = ObjectMapper()
+            .readValue(evaluation.triggeredRules, object : TypeReference<List<TriggeredRuleDto>>() {})
+        val ruleScores = ObjectMapper()
+            .readValue(evaluation.ruleScores, object : TypeReference<Map<String, Int>>() {})
 
         return RiskEvaluationResponse(
             id = evaluation.id,

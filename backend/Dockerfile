@@ -6,7 +6,7 @@ WORKDIR /app
 COPY build.gradle.kts settings.gradle.kts gradle.properties ./
 COPY gradle ./gradle
 COPY sentinelx-shared/build.gradle.kts ./sentinelx-shared/
-COPY sentinx-auth/build.gradle.kts ./sentinelx-auth/
+COPY sentinelx-auth/build.gradle.kts ./sentinelx-auth/
 COPY sentinelx-payments/build.gradle.kts ./sentinelx-payments/
 COPY sentinelx-risk/build.gradle.kts ./sentinelx-risk/
 COPY sentinelx-threatlab/build.gradle.kts ./sentinelx-threatlab/

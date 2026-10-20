@@ -6,13 +6,19 @@ import com.sentinelx.shared.kernel.ApiResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody
 import java.util.UUID
+
+data class AskRequest(@field:NotBlank val question: String)
+data class RiskExplainResponse(val explanation: String)
 
 @RestController
 @RequestMapping("/api/ai")
-@Tag(name = "AI Features", description = "AI-powered explanations, search, and assistance")
+@Tag(name = "AI Features", description = "AI-powered explanations, search, assistance, and live streaming copilot")
 class AiController(
     private val aiService: AiService
 ) {
@@ -50,5 +56,32 @@ class AiController(
     fun searchCommunity(@Valid @RequestBody request: CommunitySearchRequest): ResponseEntity<ApiResponse<CommunitySearchResponse>> {
         val response = aiService.searchCommunity(request)
         return ResponseEntity.ok(ApiResponse.ok(response))
+    }
+
+    @PostMapping("/ask", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    @Operation(summary = "Stream interactive response from Gemini copilot")
+    fun ask(@Valid @RequestBody request: AskRequest): ResponseEntity<StreamingResponseBody> {
+        val body = StreamingResponseBody { outputStream ->
+            val chunks = aiService.answerQuestion(request.question)
+            for (chunk in chunks) {
+                val sseData = "data: $chunk\n\n"
+                outputStream.write(sseData.toByteArray())
+                outputStream.flush()
+            }
+        }
+        return ResponseEntity.ok()
+            .contentType(MediaType.TEXT_EVENT_STREAM)
+            .body(body)
+    }
+
+    @GetMapping("/explain/risk")
+    @Operation(summary = "Quick AI risk explanation for score and rules")
+    fun explainRisk(
+        @RequestParam score: Int,
+        @RequestParam decision: String,
+        @RequestParam(required = false, defaultValue = "") rules: List<String>
+    ): ResponseEntity<ApiResponse<RiskExplainResponse>> {
+        val text = aiService.explainRisk(score, decision, rules)
+        return ResponseEntity.ok(ApiResponse.ok(RiskExplainResponse(text)))
     }
 }

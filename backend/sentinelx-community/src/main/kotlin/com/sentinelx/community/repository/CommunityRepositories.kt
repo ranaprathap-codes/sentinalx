@@ -13,7 +13,6 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import java.time.Instant
-import java.util.List
 import java.util.UUID
 
 @Repository
@@ -47,6 +46,8 @@ interface ProblemReportRepository : JpaRepository<ProblemReport, UUID> {
 
 @Repository
 interface CommentRepository : JpaRepository<Comment, UUID> {
+    fun countByReportId(reportId: UUID): Int
+
     @Query("SELECT c FROM Comment c WHERE c.reportId = :reportId ORDER BY c.createdAt ASC")
     fun findByReportIdOrderByCreatedAtAsc(@Param("reportId") reportId: UUID): List<Comment>
 

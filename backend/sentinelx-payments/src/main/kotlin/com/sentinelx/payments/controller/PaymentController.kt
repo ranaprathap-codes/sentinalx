@@ -1,13 +1,16 @@
 package com.sentinelx.payments.controller
 
 import com.sentinelx.auth.domain.User
+import com.sentinelx.auth.repository.UserRepository
 import com.sentinelx.payments.dto.CreatePaymentRequest
 import com.sentinelx.payments.dto.PaymentListResponse
 import com.sentinelx.payments.dto.PaymentResponse
 import com.sentinelx.payments.dto.PaymentStateHistoryResponse
 import com.sentinelx.payments.service.PaymentService
+import com.sentinelx.shared.domain.UserRole
 import com.sentinelx.shared.kernel.ApiResponse
 import com.sentinelx.shared.kernel.CorrelationContext
+import com.sentinelx.shared.kernel.UnauthorizedException
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
@@ -21,7 +24,8 @@ import java.util.UUID
 @RequestMapping("/api/payments")
 @Tag(name = "Payments", description = "Payment processing and management")
 class PaymentController(
-    private val paymentService: PaymentService
+    private val paymentService: PaymentService,
+    private val userRepository: UserRepository
 ) {
 
     @PostMapping
@@ -38,8 +42,13 @@ class PaymentController(
 
     @GetMapping("/{id}")
     @Operation(summary = "Get payment by ID")
-    fun getPayment(@PathVariable id: UUID): ResponseEntity<ApiResponse<PaymentResponse>> {
-        val response = paymentService.getPayment(id)
+    fun getPayment(
+        @PathVariable id: UUID,
+        authentication: Authentication
+    ): ResponseEntity<ApiResponse<PaymentResponse>> {
+        val user = getCurrentUser(authentication)
+        val isAdmin = user.role == UserRole.ADMIN
+        val response = paymentService.getPayment(id, user.id, isAdmin)
         return ResponseEntity.ok(ApiResponse.ok(response))
     }
 
@@ -72,14 +81,18 @@ class PaymentController(
 
     @GetMapping("/{id}/history")
     @Operation(summary = "Get payment state history")
-    fun getPaymentHistory(@PathVariable id: UUID): ResponseEntity<ApiResponse<List<PaymentStateHistoryResponse>>> {
-        val history = paymentService.getPaymentHistory(id)
+    fun getPaymentHistory(
+        @PathVariable id: UUID,
+        authentication: Authentication
+    ): ResponseEntity<ApiResponse<List<PaymentStateHistoryResponse>>> {
+        val user = getCurrentUser(authentication)
+        val isAdmin = user.role == UserRole.ADMIN
+        val history = paymentService.getPaymentHistory(id, user.id, isAdmin)
         return ResponseEntity.ok(ApiResponse.ok(history))
     }
 
     private fun getCurrentUser(authentication: Authentication): User {
-        // In a real implementation, this would come from a UserService
-        // For now, we'll return a mock - this needs to be connected to auth module
-        return User(email = authentication.name, passwordHash = "", fullName = null)
+        return userRepository.findActiveByEmail(authentication.name)
+            ?: throw UnauthorizedException("User not authenticated or account inactive")
     }
 }

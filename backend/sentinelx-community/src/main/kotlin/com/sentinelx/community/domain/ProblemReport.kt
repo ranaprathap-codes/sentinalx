@@ -23,7 +23,7 @@ import java.util.UUID
         Index(name = "idx_problem_reports_component", columnList = "component"),
         Index(name = "idx_problem_reports_reporter_id", columnList = "reporter_id"),
         Index(name = "idx_problem_reports_created_at", columnList = "created_at"),
-        Index(name = "idx_problem_reports_tags", columnList = "tags", columnDefinition = "TEXT[]")
+        Index(name = "idx_problem_reports_tags", columnList = "tags")
     ]
 )
 class ProblemReport(

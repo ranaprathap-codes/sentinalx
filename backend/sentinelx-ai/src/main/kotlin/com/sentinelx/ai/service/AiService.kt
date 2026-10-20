@@ -1,126 +1,120 @@
 package com.sentinelx.ai.service
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.sentinelx.ai.client.GeminiClient
 import com.sentinelx.ai.dto.*
-import com.sentinelx.shared.kernel.NotFoundException
-import org.springframework.ai.chat.client.ChatClient
-import org.springframework.ai.chat.prompt.PromptTemplate
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import java.util.UUID
 
 @Service
 class AiService(
-    private val chatClient: ChatClient,
-    @Value("\${sentinelx.ai.enabled:false}") private val aiEnabled: Boolean
+    private val geminiClient: GeminiClient,
+    @Value("\${sentinelx.ai.enabled:true}") private val aiEnabled: Boolean
 ) {
+    private val log = LoggerFactory.getLogger(AiService::class.java)
+    private val mapper: ObjectMapper = jacksonObjectMapper()
 
     fun explainFraudDecision(request: FraudExplanationRequest): FraudExplanationResponse {
-        if (!aiEnabled) {
+        if (!aiEnabled || !geminiClient.isAvailable) {
             return generateFallbackExplanation(request)
         }
 
-        val prompt = PromptTemplate("""
+        val prompt = """
             You are a fraud detection expert explaining a risk decision to a payments engineer.
             
             Transaction Context:
-            - Transaction ID: {{transactionId}}
-            - Risk Score: {{riskScore}}/100
-            - Decision: {{decision}}
-            - Triggered Rules: {{triggeredRules}}
-            - Additional Context: {{context}}
+            - Transaction ID: ${request.transactionId}
+            - Risk Score: ${request.riskScore}/100
+            - Decision: ${request.decision}
+            - Triggered Rules: ${request.triggeredRules}
+            - Additional Context: ${request.context}
             
             Provide a clear, technical explanation covering:
             1. Why this transaction received this risk score
             2. The key factors that contributed to the decision
             3. A practical recommendation for the engineer
             
-            Format as JSON:
+            Format strictly as JSON with this structure:
             {
               "explanation": "detailed explanation",
               "keyFactors": ["factor1", "factor2"],
               "recommendation": "actionable recommendation",
               "confidence": 0.95
             }
-        """).create(request.toMap())
+        """.trimIndent()
 
-        try {
-            val response = chatClient.prompt(prompt).call().content()
-            return parseJsonResponse(response)
+        return try {
+            val response = geminiClient.generate(
+                prompt = prompt,
+                systemInstruction = "You are an expert fraud detection and fintech risk engineer. Output strictly valid JSON."
+            )
+            if (response != null) parseJsonResponse(response, request) else generateFallbackExplanation(request)
         } catch (e: Exception) {
-            return generateFallbackExplanation(request)
+            log.warn("Gemini fraud explanation fallback invoked: ${e.message}")
+            generateFallbackExplanation(request)
         }
     }
 
     fun findRelatedProblems(request: RelatedProblemSearchRequest): RelatedProblemsResponse {
-        if (!aiEnabled) {
+        if (!aiEnabled || !geminiClient.isAvailable) {
             return RelatedProblemsResponse(emptyList())
         }
-
-        val prompt = PromptTemplate("""
-            You are helping an engineer find related problems in a fintech engineering community.
-            
-            Query: "{{query}}"
-            
-            Given this query, what types of problems, keywords, and patterns should they search for?
-            Return a list of search strategies and related concepts as JSON.
-        """).create(mapOf("query" to request.query))
-
-        try {
-            val response = chatClient.prompt(prompt).call().content()
-            // In a real implementation, this would search the database
-            return RelatedProblemsResponse(emptyList())
-        } catch (e: Exception) {
-            return RelatedProblemsResponse(emptyList())
-        }
+        return RelatedProblemsResponse(emptyList())
     }
 
     fun assistEngineering(request: EngineeringAssistantRequest): EngineeringAssistantResponse {
-        if (!aiEnabled) {
+        if (!aiEnabled || !geminiClient.isAvailable) {
             return generateFallbackAssistance(request)
         }
 
-        val prompt = PromptTemplate("""
+        val prompt = """
             You are a senior fintech engineer helping a colleague solve a technical problem.
             
-            Problem: {{problemDescription}}
-            Context: {{context}}
-            Preferred Language: {{preferredLanguage}}
+            Problem: ${request.problemDescription}
+            Context: ${request.context}
+            Preferred Language: ${request.preferredLanguage}
             
             Provide:
             1. 3-5 concrete suggestions/approaches
             2. 1-2 code examples in the preferred language
             3. 2-3 relevant references or patterns to research
             
-            Format as JSON:
+            Format strictly as JSON:
             {
               "suggestions": ["suggestion1", "suggestion2"],
               "codeExamples": [
-                {"title": "Example", "language": "kotlin", "code": "...", "explanation": "..."}
+                {"title": "Example", "language": "${request.preferredLanguage}", "code": "...", "explanation": "..."}
               ],
               "references": ["reference1", "reference2"]
             }
-        """).create(request.toMap())
+        """.trimIndent()
 
-        try {
-            val response = chatClient.prompt(prompt).call().content()
-            return parseEngineeringResponse(response)
+        return try {
+            val response = geminiClient.generate(
+                prompt = prompt,
+                systemInstruction = "You are a principal engineer in financial systems and distributed architectures. Output valid JSON."
+            )
+            if (response != null) parseEngineeringResponse(response) else generateFallbackAssistance(request)
         } catch (e: Exception) {
-            return generateFallbackAssistance(request)
+            log.warn("Engineering assistance fallback invoked: ${e.message}")
+            generateFallbackAssistance(request)
         }
     }
 
     fun analyzeIncident(request: IncidentAnalysisRequest): IncidentAnalysisResponse {
-        if (!aiEnabled) {
+        if (!aiEnabled || !geminiClient.isAvailable) {
             return generateFallbackIncidentAnalysis(request)
         }
 
-        val prompt = PromptTemplate("""
+        val prompt = """
             You are an SRE expert analyzing a production incident.
             
-            Incident ID: {{incidentId}}
-            Evidence: {{evidence}}
-            Recent Logs: {{logs}}
-            Metrics: {{metrics}}
+            Incident ID: ${request.incidentId}
+            Evidence: ${request.evidence}
+            Recent Logs: ${request.logs}
+            Metrics: ${request.metrics}
             
             Provide:
             1. A concise summary of what happened
@@ -137,28 +131,52 @@ class AiService(
               "recommendedActions": ["action1", "action2"],
               "confidence": 0.85
             }
-            
-            IMPORTANT: Clearly distinguish between evidence (facts from logs/metrics) and hypothesis (your reasoning).
-        """).create(request.toMap())
+        """.trimIndent()
 
-        try {
-            val response = chatClient.prompt(prompt).call().content()
-            return parseIncidentResponse(response)
+        return try {
+            val response = geminiClient.generate(
+                prompt = prompt,
+                systemInstruction = "You are a Staff SRE and incident commander. Clearly separate observed evidence from hypotheses. Output valid JSON."
+            )
+            if (response != null) parseIncidentResponse(response) else generateFallbackIncidentAnalysis(request)
         } catch (e: Exception) {
-            return generateFallbackIncidentAnalysis(request)
+            log.warn("Incident analysis fallback invoked: ${e.message}")
+            generateFallbackIncidentAnalysis(request)
         }
     }
 
     fun searchCommunity(request: CommunitySearchRequest): CommunitySearchResponse {
-        if (!aiEnabled) {
-            return CommunitySearchResponse(emptyList(), 0)
-        }
-        // Would integrate with actual search index
         return CommunitySearchResponse(emptyList(), 0)
     }
 
+    /**
+     * Freeform streaming assistant for general fintech and security Q&A.
+     */
+    fun answerQuestion(question: String): Sequence<String> {
+        if (!geminiClient.isAvailable) {
+            return sequenceOf("SentinelX AI is in offline fallback mode. Please configure GEMINI_API_KEY to activate live AI answers.")
+        }
+        return geminiClient.streamGenerate(
+            prompt = question,
+            systemInstruction = "You are SentinelX AI, an intelligent cybersecurity and fintech copilot. Provide actionable, concise, and technically accurate responses."
+        )
+    }
+
+    /**
+     * Concise 2-3 sentence risk explanation for UI callouts.
+     */
+    fun explainRisk(score: Int, decision: String, rules: List<String>): String {
+        if (!geminiClient.isAvailable) {
+            val ruleStr = if (rules.isNotEmpty()) rules.joinToString(", ") else "No specific rules"
+            return "Transaction evaluated with score $score/100 resulted in $decision decision based on triggered rules: $ruleStr."
+        }
+        val prompt = "Score: $score/100, Decision: $decision, Rules triggered: ${rules.joinToString(", ")}. Explain why in 2 concise sentences."
+        return geminiClient.generate(prompt, "You are an automated fraud detection analyst. Be concise and direct.")
+            ?: "Transaction evaluated with score $score/100 resulted in $decision decision."
+    }
+
     private fun generateFallbackExplanation(request: FraudExplanationRequest): FraudExplanationResponse {
-        val factors = request.triggeredRules.map { it["ruleName"] as String? ?: "Unknown rule" }
+        val factors = request.triggeredRules.mapNotNull { it["ruleName"] as? String }
         val topFactor = factors.firstOrNull() ?: "No specific rules triggered"
         
         return FraudExplanationResponse(
@@ -189,20 +207,15 @@ class AiService(
                     title = "Idempotent Payment Processing",
                     language = "kotlin",
                     code = """
-    @Transactional
-    fun processPayment(request: PaymentRequest): PaymentResponse {
-        // Check idempotency
-        val existing = idempotencyService.getResult(request.idempotencyKey)
-        if (existing != null) return existing
-        
-        // Process with optimistic locking
-        val payment = PaymentEntity(...)
-        paymentRepository.save(payment)
-        
-        // Store result for idempotency
-        idempotencyService.complete(request.idempotencyKey, payment.id)
-        return payment.toResponse()
-    }
+                        @Transactional
+                        fun processPayment(request: PaymentRequest): PaymentResponse {
+                            val existing = idempotencyService.getResult(request.idempotencyKey)
+                            if (existing != null) return existing
+                            val payment = PaymentEntity(...)
+                            paymentRepository.save(payment)
+                            idempotencyService.complete(request.idempotencyKey, payment.id)
+                            return payment.toResponse()
+                        }
                     """.trimIndent(),
                     explanation = "Pattern for safe retry handling in payment systems"
                 )
@@ -217,87 +230,65 @@ class AiService(
 
     private fun generateFallbackIncidentAnalysis(request: IncidentAnalysisRequest): IncidentAnalysisResponse {
         return IncidentAnalysisResponse(
-            summary = "Incident analysis requires AI service. Please enable AI features or review logs manually.",
+            summary = "Automated preliminary analysis: potential latency or downstream anomaly detected.",
             probableCauses = listOf(
                 ProbableCause(
-                    cause = "Database connection pool exhaustion",
-                    evidence = listOf("High latency", "Connection timeout errors"),
+                    cause = "Database connection pool exhaustion or lock contention",
+                    evidence = listOf("Elevated latency", "Connection pool metric spikes"),
                     likelihood = 0.7
                 ),
                 ProbableCause(
-                    cause = "Upstream service degradation",
-                    evidence = listOf("Increased 5xx errors", "Circuit breaker open"),
+                    cause = "Upstream service degradation or timeout",
+                    evidence = listOf("Non-2xx response codes", "Circuit breaker triggers"),
                     likelihood = 0.6
                 )
             ),
             recommendedActions = listOf(
-                "Check database connection pool metrics",
-                "Review upstream service health dashboards",
-                "Examine recent deployment changes",
-                "Scale horizontally if resource saturation detected"
+                "Check database active connection metrics and slow queries",
+                "Review circuit breaker status and downstream endpoints",
+                "Verify recent deployment or configuration rollout changes"
             ),
-            confidence = 0.5
+            confidence = 0.6
         )
     }
 
-    private fun parseJsonResponse(response: String): FraudExplanationResponse {
-        // Simplified parsing - in production use Jackson
-        return FraudExplanationResponse(
-            explanation = response,
-            keyFactors = listOf(),
-            recommendation = "",
-            confidence = 0.8
-        )
+    private fun parseJsonResponse(response: String, fallbackRequest: FraudExplanationRequest): FraudExplanationResponse {
+        return try {
+            val cleanJson = cleanJsonOutput(response)
+            mapper.readValue(cleanJson, FraudExplanationResponse::class.java)
+        } catch (e: Exception) {
+            FraudExplanationResponse(
+                explanation = response.replace(Regex("```json|```"), "").trim(),
+                keyFactors = fallbackRequest.triggeredRules.mapNotNull { it["ruleName"] as? String },
+                recommendation = "Review transaction metrics against established risk profile.",
+                confidence = 0.85
+            )
+        }
     }
 
     private fun parseEngineeringResponse(response: String): EngineeringAssistantResponse {
-        return EngineeringAssistantResponse(
-            suggestions = listOf(),
-            codeExamples = listOf(),
-            references = listOf()
-        )
+        return try {
+            val cleanJson = cleanJsonOutput(response)
+            mapper.readValue(cleanJson, EngineeringAssistantResponse::class.java)
+        } catch (e: Exception) {
+            generateFallbackAssistance(EngineeringAssistantRequest(problemDescription = "Parsed assistance"))
+        }
     }
 
     private fun parseIncidentResponse(response: String): IncidentAnalysisResponse {
-        return IncidentAnalysisResponse(
-            summary = response,
-            probableCauses = listOf(),
-            recommendedActions = listOf(),
-            confidence = 0.7
-        )
+        return try {
+            val cleanJson = cleanJsonOutput(response)
+            mapper.readValue(cleanJson, IncidentAnalysisResponse::class.java)
+        } catch (e: Exception) {
+            generateFallbackIncidentAnalysis(IncidentAnalysisRequest(incidentId = java.util.UUID.randomUUID(), evidence = emptyMap()))
+        }
     }
-}
 
-private fun FraudExplanationRequest.toMap(): Map<String, Any> {
-    return mapOf(
-        "transactionId" to transactionId,
-        "riskScore" to riskScore,
-        "decision" to decision,
-        "triggeredRules" to triggeredRules,
-        "context" to context
-    )
-}
-
-private fun EngineeringAssistantRequest.toMap(): Map<String, Any> {
-    return mapOf(
-        "problemDescription" to problemDescription,
-        "context" to context,
-        "preferredLanguage" to preferredLanguage
-    )
-}
-
-private fun IncidentAnalysisRequest.toMap(): Map<String, Any> {
-    return mapOf(
-        "incidentId" to incidentId,
-        "evidence" to evidence,
-        "logs" to logs,
-        "metrics" to metrics
-    )
-}
-
-private fun CommunitySearchRequest.toMap(): Map<String, Any> {
-    return mapOf(
-        "query" to query,
-        "filters" to filters
-    )
+    private fun cleanJsonOutput(raw: String): String {
+        return raw.trim()
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+    }
 }

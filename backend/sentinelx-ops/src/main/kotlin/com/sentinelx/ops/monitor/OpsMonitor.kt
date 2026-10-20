@@ -1,11 +1,11 @@
 package com.sentinelx.ops.monitor
 
 import com.sentinelx.ops.domain.Incident
-import com.sentinelx.ops.domain.IncidentSeverity
-import com.sentinelx.ops.domain.IncidentStatus
-import com.sentinelx.ops.domain.IncidentType
 import com.sentinelx.ops.repository.IncidentRepository
 import com.sentinelx.ops.service.OpsService
+import com.sentinelx.shared.domain.IncidentSeverity
+import com.sentinelx.shared.domain.IncidentStatus
+import com.sentinelx.shared.domain.IncidentType
 import com.sentinelx.shared.event.EventPublisher
 import com.sentinelx.shared.event.IncidentCreatedEvent
 import io.micrometer.core.instrument.MeterRegistry
@@ -53,8 +53,8 @@ class OpsMonitor(
 
         // Clean old metrics (keep last 10 minutes)
         val cutoff = now - 600000
-        recentErrorRates.keys().filter { it < cutoff }.forEach { recentErrorRates.remove(it) }
-        recentLatencies.keys().filter { it < cutoff }.forEach { recentLatencies.remove(it) }
+        recentErrorRates.keys.filter { it < cutoff }.forEach { recentErrorRates.remove(it) }
+        recentLatencies.keys.filter { it < cutoff }.forEach { recentLatencies.remove(it) }
 
         // Check for anomalies
         detectErrorSpike(errorRate, now)
@@ -73,7 +73,7 @@ class OpsMonitor(
     private fun detectErrorSpike(currentErrorRate: Double, now: Long) {
         if (recentErrorRates.size < 5) return // Need baseline
 
-        val baselineErrorRate = recentErrorRates.values.dropLast(1).average()
+        val baselineErrorRate = recentErrorRates.values.toList().dropLast(1).average()
         val threshold = baselineErrorRate * 5 // 5x baseline
         val minThreshold = 0.05 // At least 5% error rate
 
@@ -104,7 +104,7 @@ class OpsMonitor(
     private fun detectLatencySpike(currentLatency: Double, now: Long) {
         if (recentLatencies.size < 5) return
 
-        val baselineLatency = recentLatencies.values.dropLast(1).average()
+        val baselineLatency = recentLatencies.values.toList().dropLast(1).average()
         val threshold = baselineLatency * 3 // 3x baseline
         val minThreshold = 500.0 // At least 500ms
 
@@ -144,7 +144,7 @@ class OpsMonitor(
             title = title,
             evidenceJson = com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(evidence)
         ).apply {
-            affectedComponents = affectedComponents.toTypedArray()
+            this.affectedComponents = affectedComponents.toTypedArray()
             description = "Automatically detected by OpsSentinel monitoring"
         }
 

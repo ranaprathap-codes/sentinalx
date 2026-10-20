@@ -1,0 +1,31 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/sentinelx
+    username: sentinelx
+    password: sentinelx_dev
+
+  redis:
+    host: localhost
+    port: 6379
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+  mail:
+    host: localhost
+    port: 1025
+
+sentinelx:
+  jwt:
+    secret: dev-secret-key-min-32-chars-long-for-hmac-sha256
+  ai:
+    enabled: false
+
+logging:
+  level:
+    com.sentinelx: DEBUG
+    org.springframework.web: DEBUG

@@ -1,5 +1,6 @@
 package com.sentinelx.shared.security
 
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
@@ -25,7 +26,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
     jsr250Enabled = true
 )
 class SecurityConfig(
-    private val jwtAuthenticationFilter: JwtAuthenticationFilter
+    private val jwtAuthenticationFilter: JwtAuthenticationFilter,
+    private val rateLimitFilter: RateLimitFilter,
+    @Value("\${sentinelx.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000}")
+    private val allowedOriginsRaw: String
 ) {
 
     @Bean
@@ -82,6 +86,10 @@ class SecurityConfig(
                     .authenticated()
             }
             .addFilterBefore(
+                rateLimitFilter,
+                UsernamePasswordAuthenticationFilter::class.java
+            )
+            .addFilterBefore(
                 jwtAuthenticationFilter,
                 UsernamePasswordAuthenticationFilter::class.java
             )
@@ -135,13 +143,10 @@ class SecurityConfig(
 
     @Bean
     fun corsConfigurationSource(): CorsConfigurationSource {
-
         val configuration = CorsConfiguration()
 
-        configuration.allowedOrigins = listOf(
-            "http://localhost:3000",
-            "http://127.0.0.1:3000"
-        )
+        val origins = allowedOriginsRaw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        configuration.allowedOrigins = if (origins.isNotEmpty()) origins else listOf("http://localhost:3000", "http://127.0.0.1:3000")
 
         configuration.allowedMethods = listOf(
             "GET",
@@ -153,13 +158,10 @@ class SecurityConfig(
         )
 
         configuration.allowedHeaders = listOf("*")
-
         configuration.allowCredentials = true
-
         configuration.maxAge = 3600L
 
         val source = UrlBasedCorsConfigurationSource()
-
         source.registerCorsConfiguration(
             "/**",
             configuration

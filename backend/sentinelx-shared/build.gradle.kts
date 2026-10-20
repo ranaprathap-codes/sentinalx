@@ -4,6 +4,14 @@ plugins {
     id("org.flywaydb.flyway")
 }
 
+tasks.named("bootJar") {
+    (this as org.springframework.boot.gradle.tasks.bundling.BootJar).enabled = false
+}
+
+tasks.named("jar") {
+    (this as org.gradle.jvm.tasks.Jar).enabled = true
+}
+
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-validation")

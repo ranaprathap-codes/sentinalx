@@ -27,5 +27,5 @@ dependencies {
 }
 
 springBoot {
-    mainClass.set("com.sentinelx.SentinelXApplicationKt")
+    mainClass.set("com.sentinelx.app.SentinelXApplicationKt")
 }

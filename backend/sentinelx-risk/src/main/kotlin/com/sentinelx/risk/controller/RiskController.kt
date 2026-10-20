@@ -1,16 +1,20 @@
 package com.sentinelx.risk.controller
 
+import com.sentinelx.auth.repository.UserRepository
 import com.sentinelx.risk.dto.EvaluateRiskRequest
 import com.sentinelx.risk.dto.RiskEvaluationResponse
 import com.sentinelx.risk.dto.RiskRuleRequest
 import com.sentinelx.risk.dto.RiskRuleResponse
 import com.sentinelx.risk.service.RiskService
+import com.sentinelx.shared.domain.UserRole
 import com.sentinelx.shared.kernel.ApiResponse
+import com.sentinelx.shared.kernel.UnauthorizedException
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
+import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
@@ -18,7 +22,8 @@ import java.util.UUID
 @RequestMapping("/api/risk")
 @Tag(name = "Risk Engine", description = "Fraud detection and risk evaluation")
 class RiskController(
-    private val riskService: RiskService
+    private val riskService: RiskService,
+    private val userRepository: UserRepository
 ) {
 
     @PostMapping("/evaluate")
@@ -30,8 +35,14 @@ class RiskController(
 
     @GetMapping("/evaluation/{transactionId}")
     @Operation(summary = "Get risk evaluation for transaction")
-    fun getEvaluation(@PathVariable transactionId: UUID): ResponseEntity<ApiResponse<RiskEvaluationResponse>> {
-        val response = riskService.getEvaluation(transactionId)
+    fun getEvaluation(
+        @PathVariable transactionId: UUID,
+        authentication: Authentication
+    ): ResponseEntity<ApiResponse<RiskEvaluationResponse>> {
+        val user = userRepository.findActiveByEmail(authentication.name)
+            ?: throw UnauthorizedException("User not authenticated")
+        val isAdmin = user.role == UserRole.ADMIN || user.role == UserRole.ANALYST
+        val response = riskService.getEvaluation(transactionId, user.id, isAdmin)
         return ResponseEntity.ok(ApiResponse.ok(response))
     }
 

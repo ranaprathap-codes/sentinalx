@@ -1,5 +1,7 @@
 package com.sentinelx.threatlab.service
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.sentinelx.auth.domain.User
 import com.sentinelx.threatlab.domain.SimulationRun
 import com.sentinelx.threatlab.domain.ThreatScenario
@@ -26,7 +28,8 @@ import java.util.UUID
 class ThreatLabService(
     private val scenarioRepository: ThreatScenarioRepository,
     private val simulationRepository: SimulationRunRepository,
-    private val simulationRunner: SimulationRunner
+    private val simulationRunner: SimulationRunner,
+    private val objectMapper: ObjectMapper
 ) {
 
     // Scenario management
@@ -124,7 +127,11 @@ class ThreatLabService(
             .orElseThrow { NotFoundException("Scenario not found: ${original.scenarioId}") }
 
         // Re-run with same input
-        val reproduction = simulationRunner.runSimulation(scenario, original.userId, objectMapper.readValue(original.inputJson))
+        val reproduction = simulationRunner.runSimulation(
+            scenario,
+            original.userId,
+            objectMapper.readValue(original.inputJson, object : TypeReference<Map<String, Any>>() {})
+        )
         val savedReproduction = simulationRepository.save(reproduction)
 
         val originalResponse = toSimulationResponse(original, scenario.name)

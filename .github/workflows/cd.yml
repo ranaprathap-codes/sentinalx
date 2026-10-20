@@ -1,0 +1,122 @@
+name: CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      version:
+        description: 'Docker image tag to deploy'
+        required: false
+        type: string
+        default: 'latest'
+
+jobs:
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'dev' || github.ref == 'refs/heads/develop'
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service \
+            --cluster sentinelx-dev-cluster \
+            --service sentinelx-dev-app \
+            --force-new-deployment \
+            --region us-east-1
+
+      - name: Wait for deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster sentinelx-dev-cluster \
+            --services sentinelx-dev-app \
+            --region us-east-1
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'prod'
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deploy to ECS (Blue/Green)
+        run: |
+          # Create new task definition with updated image
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition sentinelx-prod-app \
+            --query 'taskDefinition' \
+            --region us-east-1)
+          
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq \
+            --arg IMAGE "${{ secrets.ECR_REGISTRY }}/sentinelx-backend:${{ github.event.inputs.version }}" \
+            '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          
+          aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --region us-east-1
+
+          # Update service
+          aws ecs update-service \
+            --cluster sentinelx-prod-cluster \
+            --service sentinelx-prod-app \
+            --task-definition sentinelx-prod-app \
+            --region us-east-1
+
+      - name: Wait for deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster sentinelx-prod-cluster \
+            --services sentinelx-prod-app \
+            --region us-east-1
+
+      - name: Run smoke tests
+        run: |
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names sentinelx-prod-alb \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text \
+            --region us-east-1)
+          
+          # Wait for health checks
+          sleep 30
+          
+          # Test health endpoint
+          curl -f "https://$ALB_DNS/actuator/health" || exit 1
+          
+          # Test API endpoint
+          curl -f "https://$ALB_DNS/api/health" || exit 1
